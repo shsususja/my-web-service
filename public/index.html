@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 수학 문제 스캐너</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+        body { background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); min-height: 100vh; display: flex; justify-content: center; align-items: center; padding: 20px; }
+        .container { width: 100%; max-width: 500px; background: #ffffff; border-radius: 20px; padding: 28px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); }
+        .header { text-align: center; margin-bottom: 24px; }
+        .header h1 { font-size: 1.5rem; color: #1a1f36; font-weight: 700; margin-bottom: 6px; }
+        .header p { font-size: 0.9rem; color: #697386; }
+        
+        .btn-group { display: flex; gap: 10px; margin-bottom: 20px; }
+        .btn { flex: 1; padding: 14px; border: none; border-radius: 12px; font-weight: 600; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; display: flex; justify-content: center; align-items: center; gap: 6px; }
+        .btn-primary { background: #635bff; color: white; }
+        .btn-primary:hover { background: #4b45db; }
+        .btn-secondary { background: #f0f2ff; color: #635bff; border: 1px solid #d0d7ff; }
+        .btn-secondary:hover { background: #e2e6ff; }
+        
+        .camera-view { display: none; margin-bottom: 20px; text-align: center; background: #000; border-radius: 14px; overflow: hidden; position: relative; }
+        video { width: 100%; max-height: 300px; object-fit: cover; }
+        .capture-btn { position: absolute; bottom: 15px; left: 50%; transform: translateX(-50%); background: #ffffff; color: #1a1f36; border: none; padding: 10px 20px; border-radius: 20px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+
+        .preview-container { display: none; margin-bottom: 20px; text-align: center; }
+        .preview-img { width: 100%; max-height: 250px; object-fit: contain; border-radius: 12px; border: 1px solid #e3e8ee; background: #fafbfc; }
+
+        .result-card { display: none; background: #ffffff; border: 1px solid #e3e8ee; border-radius: 14px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }
+        .result-title { font-size: 1rem; font-weight: 700; color: #1a1f36; margin-bottom: 12px; }
+        .result-content { font-size: 0.92rem; color: #3c4257; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
+
+        .loading-box { display: none; text-align: center; padding: 20px 0; }
+        .spinner { width: 36px; height: 36px; border: 3px solid #f3f3f3; border-top: 3px solid #635bff; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 12px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .loading-text { font-size: 0.9rem; font-weight: 600; color: #635bff; }
+        #fileInput { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h1>📸 AI 수학 문제 스캐너</h1>
+        <p>사진을 직접 찍거나 파일을 올려 AI 풀이를 확인하세요</p>
+    </div>
+
+    <div class="btn-group">
+        <button class="btn btn-primary" onclick="openCamera()">📷 실시간 촬영</button>
+        <button class="btn btn-secondary" onclick="document.getElementById('fileInput').click()">📁 파일 업로드</button>
+    </div>
+    
+    <input type="file" id="fileInput" accept="image/*" onchange="processFile(event)">
+
+    <!-- 실시간 카메라 미리보기 -->
+    <div class="camera-view" id="cameraView">
+        <video id="webcam" autoplay playsinline></video>
+        <button class="capture-btn" onclick="capturePhoto()">📸 촬영하기</button>
+    </div>
+
+    <div class="preview-container" id="previewBox">
+        <img id="previewImg" class="preview-img" alt="선택된 이미지">
+    </div>
+
+    <div class="loading-box" id="loadingBox">
+        <div class="spinner"></div>
+        <div class="loading-text">AI가 문제를 분석하고 풀이하는 중...</div>
+    </div>
+
+    <div class="result-card" id="resultCard">
+        <div class="result-title">💡 문제 풀이 결과</div>
+        <div class="result-content" id="resultText"></div>
+    </div>
+</div>
+
+<canvas id="canvas" style="display:none;"></canvas>
+
+<script>
+let videoStream = null;
+
+// 1. 실시간 웹캠/카메라 화면 켜기
+async function openCamera() {
+    const cameraView = document.getElementById('cameraView');
+    const video = document.getElementById('webcam');
+    
+    document.getElementById('previewBox').style.display = 'none';
+    document.getElementById('resultCard').style.display = 'none';
+
+    try {
+        videoStream = await navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: 'environment' } // 모바일은 후면 카메라 우선, PC는 기본 웹캠
+        });
+        video.srcObject = videoStream;
+        cameraView.style.display = 'block';
+    } catch (err) {
+        alert('카메라에 접근할 수 없습니다. 브라우저의 카메라 사용 권한을 허용해 주세요.');
+    }
+}
+
+// 2. 화면 촬영 및 AI 전달
+function capturePhoto() {
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('canvas');
+    const context = canvas.getContext('2d');
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    if (videoStream) {
+        videoStream.getTracks().forEach(track => track.stop());
+    }
+    document.getElementById('cameraView').style.display = 'none';
+
+    const dataUrl = canvas.toDataURL('image/jpeg');
+    document.getElementById('previewImg').src = dataUrl;
+    document.getElementById('previewBox').style.display = 'block';
+
+    const base64Data = dataUrl.split(',')[1];
+    sendToApi(base64Data, 'image/jpeg');
+}
+
+// 3. 파일 업로드 처리
+function processFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (videoStream) {
+        videoStream.getTracks().forEach(track => track.stop());
+        document.getElementById('cameraView').style.display = 'none';
+    }
+
+    document.getElementById('previewImg').src = URL.createObjectURL(file);
+    document.getElementById('previewBox').style.display = 'block';
+
+    const reader = new FileReader();
+    reader.onload = function() {
+        const base64Data = reader.result.split(',')[1];
+        sendToApi(base64Data, file.type);
+    };
+    reader.readAsDataURL(file);
+}
+
+// 4. API 서버로 이미지 전송
+async function sendToApi(base64Data, mimeType) {
+    const loadingBox = document.getElementById('loadingBox');
+    const resultCard = document.getElementById('resultCard');
+    const resultText = document.getElementById('resultText');
+
+    resultCard.style.display = 'none';
+    loadingBox.style.display = 'block';
+
+    try {
+        const response = await fetch('/api/solve', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageBase64: base64Data, mimeType: mimeType || 'image/jpeg' })
+        });
+
+        const data = await response.json();
+        loadingBox.style.display = 'none';
+        resultCard.style.display = 'block';
+
+        if (data.result) {
+            resultText.innerHTML = data.result;
+        } else {
+            resultText.innerHTML = `<span style="color: #df1b41; font-weight: 600;">⚠️ 오류 발생: ${data.error}</span>`;
+        }
+    } catch (err) {
+        loadingBox.style.display = 'none';
+        resultCard.style.display = 'block';
+        resultText.innerHTML = '<span style="color: #df1b41; font-weight: 600;">⚠️ 서버 통신에 실패했습니다.</span>';
+    }
+}
+</script>
+
+</body>
+</html>
