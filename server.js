@@ -1,63 +1,62 @@
-require('dotenv').config();
 const express = require('express');
-const path = require('path');
+const { GoogleGenAI } = require('@google/genai');
+const dotenv = require('dotenv');
+
+dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const port = process.env.PORT || 10000;
 
-// 용량이 큰 이미지 데이터를 받아오기 위해 10mb 용량 제한 설정
 app.use(express.json({ limit: '10mb' }));
+app.use(express.static('public'));
 
-// public 폴더 안의 index.html 파일을 메인 화면으로 보여줌
-app.use(express.static(path.join(__dirname, 'public')));
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-app.post('/api/solve', async (req, res) => {
-    const { imageBase64, mimeType } = req.body;
-    const apiKey = process.env.GEMINI_API_KEY;
-
-    if (!apiKey) {
-        return res.status(500).json({ error: '.env 파일에 API 키가 설정되지 않았습니다.' });
+app.post('/api/analyze', async (req, res) => {
+  try {
+    const { image } = req.body;
+    if (!image) {
+      return res.status(400).json({ error: '이미지가 필요합니다.' });
     }
 
-    try {
-        const promptText = "이 문제 이미지의 텍스트와 도형을 읽어서 풀이를 작성해줘. " +
-                          "수식 규칙: $, \\overline, \\frac, \\angle 같은 LaTeX 기호는 절대 사용 금지. " +
-                          "선분은 '선분 AB', 각도는 '∠ABC', 분수는 '1/3'처럼 일반 글자로 적어줘. " +
-                          "[출제의도], [단계별 풀이], [정답] 순서로 명확하게 보여줘.";
+    const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
 
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{
-                    parts: [
-                        { text: promptText },
-                        { inline_data: { mime_type: mimeType || 'image/jpeg', data: imageBase64 } }
-                    ]
-                }]
-            })
-        });
+    const prompt = `
+당신은 최고의 수학 선생님입니다. 제출된 이미지의 수학 문제를 분석하여 아래 양식에 맞추어 한국어로 친절하게 답변해주세요.
 
-        const data = await response.json();
+### 📌 1. 핵심 수학 개념
+- 이 문제가 해당하는 단원과 꼭 알아야 할 핵심 공식/개념을 2~3줄로 설명해주세요.
 
-        if (data.candidates && data.candidates[0].content) {
-            let text = data.candidates[0].content.parts[0].text;
-            text = text.replace(/\$\$(.*?)\$\$/g, '$1')
-                       .replace(/\$(.*?)\$/g, '$1')
-                       .replace(/\\overline\{(.*?)\}/g, '선분 $1')
-                       .replace(/\\angle\s*([A-Za-z0-9]+)/g, '∠$1')
-                       .replace(/\\frac\{(.*?)\}\{(.*?)\}/g, '$1/$2')
-                       .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+### 📝 2. 단계별 상세 풀이
+- 풀이 과정을 초등학생도 이해할 수 있도록 1단계, 2단계, 3단계로 나누어 명확하게 작성해주세요.
 
-            res.json({ result: text });
-        } else {
-            res.status(500).json({ error: data.error?.message || 'AI 분석 실패' });
-        }
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+### 🎯 3. 최종 정답
+- 최종 답을 명확하게 표시해주세요.
+
+### 🔄 4. 쌍둥이 유사 문제 (복습용)
+- 이 문제와 원리가 같은 새로운 유사 문제 1개와 그 정답을 만들어주세요.
+`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [
+        {
+          inlineData: {
+            mimeType: 'image/jpeg',
+            data: base64Data
+          }
+        },
+        { text: prompt }
+      ]
+    });
+
+    res.json({ result: response.text });
+  } catch (error) {
+    console.error('AI 분석 오류:', error);
+    res.status(500).json({ error: '수학 문제 분석 중 오류가 발생했습니다.' });
+  }
 });
 
-app.listen(PORT, () => {
-    console.log(`서버가 성공적으로 실행되었습니다: http://localhost:${PORT}`);
+app.listen(port, () => {
+  console.log(`서버가 성공적으로 실행되었습니다: http://localhost:${port}`);
 });
