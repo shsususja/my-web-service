@@ -1,18 +1,14 @@
 {
   "name": "my-web-service",
   "version": "1.0.0",
-  "description": "",
+  "description": "AI 수학 문제 스캐너",
   "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
-    "dotenv": "^17.4.2",
-    "express": "^5.2.1"
+    "@google/genai": "^0.1.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
   }
 }
