@@ -37,13 +37,15 @@ app.post('/api/analyze', async (req, res) => {
 - 방금 푼 문제와 숫자나 형태만 살짝 바꾼, 동일한 원리의 유사 문제 1개와 정답을 만들어주세요.
     `;
 
-    // 💡 구글 API 과부하 시 최대 3번까지 자동 재시도하는 안전 로직
+    // 💡 특정 모델 과부하 시 대체 모델을 순차적으로 자동 시도하는 안전 시스템
+    const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
     let response;
-    let retries = 3;
-    while (retries > 0) {
+    let lastError;
+
+    for (const modelName of modelsToTry) {
       try {
         response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: modelName,
           contents: [
             {
               role: 'user',
@@ -54,12 +56,15 @@ app.post('/api/analyze', async (req, res) => {
             }
           ]
         });
-        break; // 성공 시 반복문 탈출
+        if (response && response.text) break; // 성공 시 즉시 루프 탈출
       } catch (err) {
-        retries--;
-        if (retries === 0) throw err; // 3번 실패 시 에러 반환
-        await new Promise(resolve => setTimeout(resolve, 1500)); // 1.5초 후 자동 재시도
+        console.warn(`${modelName} 과부하 발생, 백업 모델로 재시도합니다...`, err.message);
+        lastError = err;
       }
+    }
+
+    if (!response || !response.text) {
+      throw lastError || new Error('모든 AI 모델 연결에 실패했습니다.');
     }
 
     res.json({ result: response.text });
