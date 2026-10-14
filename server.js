@@ -1,79 +1,75 @@
 const express = require('express');
 const { GoogleGenAI } = require('@google/genai');
-const dotenv = require('dotenv');
-
-dotenv.config();
-
 const app = express();
-const port = process.env.PORT || 10000;
+const port = process.env.PORT || 3000;
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static('public'));
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// Render의 GEMINI_API_KEY 또는 API_KEY 변수를 모두 지원하도록 설정
+const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+
+let ai;
+if (apiKey) {
+  ai = new GoogleGenAI({ apiKey });
+} else {
+  console.error("WARNING: API Key is missing in environment variables!");
+}
 
 app.post('/api/analyze', async (req, res) => {
   try {
-    const { image } = req.body;
-    if (!image) {
-      return res.status(400).json({ error: '이미지가 없습니다.' });
+    if (!apiKey || !ai) {
+      return res.status(500).json({ error: "Server error: GEMINI_API_KEY standard environment variable is missing." });
     }
 
-    const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
+    const { image } = req.body;
+    if (!image) {
+      return res.status(400).json({ error: "No image provided" });
+    }
 
-    const prompt = `
-당신은 최고의 수학 선생님입니다. 제출된 이미지의 수학 문제를 분석하여 다음 양식으로 답변해주세요.
+    const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
+    const imagePart = {
+      inlineData: {
+        data: base64Data,
+        mimeType: "image/jpeg"
+      }
+    };
 
-### 📌 1. 핵심 수학 개념
-- 이 문제가 해당하는 단원과 꼭 알아야 할 핵심 공식/개념을 2~3줄로 설명해주세요.
+    const prompt = "수학 문제를 정확히 풀고 다음 형식으로 답변해 주세요:\n1. 핵심 수학 개념\n2. 단계별 상세 풀이\n3. 정답\n4. 쌍둥이 유사 문제";
 
-### 📝 2. 단계별 상세 풀이
-- 풀이 과정을 초등학생도 이해할 수 있도록 1단계, 2단계, 3단계로 나누어 명확하게 작성해주세요.
+    // 사용 가능한 모델 fallback 처리
+    const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+    let responseText = null;
+    let lastError = null;
 
-### 🎯 3. 최종 정답
-- 최종 답을 명확하게 표시해주세요.
-
-### 🔄 4. 쌍둥이 유사 문제 (복습용)
-- 방금 푼 문제와 숫자나 형태만 살짝 바꾼, 동일한 원리의 유사 문제 1개와 정답을 만들어주세요.
-    `;
-
-    // 💡 특정 모델 과부하 시 대체 모델을 순차적으로 자동 시도하는 안전 시스템
-    const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
-    let response;
-    let lastError;
-
-    for (const modelName of modelsToTry) {
+    for (const modelName of models) {
       try {
-        response = await ai.models.generateContent({
+        const response = await ai.models.generateContent({
           model: modelName,
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                { inlineData: { mimeType: 'image/jpeg', data: base64Data } },
-                { text: prompt }
-              ]
-            }
-          ]
+          contents: [prompt, imagePart]
         });
-        if (response && response.text) break; // 성공 시 즉시 루프 탈출
+        if (response && response.text) {
+          responseText = response.text;
+          break;
+        }
       } catch (err) {
-        console.warn(`${modelName} 과부하 발생, 백업 모델로 재시도합니다...`, err.message);
+        console.warn(`Model ${modelName} failed, trying next model...`, err.message);
         lastError = err;
       }
     }
 
-    if (!response || !response.text) {
-      throw lastError || new Error('모든 AI 모델 연결에 실패했습니다.');
+    if (responseText) {
+      res.json({ result: responseText });
+    } else {
+      throw lastError || new Error("Failed to generate solution from AI models.");
     }
 
-    res.json({ result: response.text });
   } catch (error) {
-    console.error('분석 에러:', error);
-    res.status(500).json({ error: error.message });
+    console.error("API Error:", error);
+    res.status(500).json({ error: error.message || "Internal server error" });
   }
 });
 
 app.listen(port, () => {
-  console.log(`서버가 포트 ${port}에서 실행 중입니다.`);
+  console.log(`Server running on port ${port}`);
 });
